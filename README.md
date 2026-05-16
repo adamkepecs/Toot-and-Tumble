@@ -7,6 +7,11 @@ MVP Construct 3 project for a one-level 2D city platformer where a rotating trom
 - Folder project: open `Toot-and-Tumble game/` as a Construct 3 project folder.
 - Single-file project: open `Toot-and-Tumble.c3p`.
 
+## Run in a Browser
+
+- Open `index.html` for a standalone browser playtest build.
+- On GitHub Pages, serve the repository root and the game will load from `index.html`.
+
 ## Controls
 
 - Space / mouse / touch press: freeze the trombone angle.
@@ -21,3 +26,4 @@ There is no normal jump button. The trombone is the jump.
 - Player body uses Construct 3 Platform behavior with default controls disabled and jump strength set to 0.
 - Cars, bus, scaffolds, building ledges, pits, construction hazard, dog, pedestrian, finish flag, HUD breath bar, and slide power meter.
 - `ES_Game` contains the global variables and event groups requested for the MVP; the main implementation is installed from a C3 script action on layout start to avoid fragile hand-authored event-block IDs.
+- `index.html` mirrors the MVP as a browser playtest page so the repo can run without opening Construct 3 first.

@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Toot &amp; Tumble</title>
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #132032;
+      color: #f9f2d6;
+      font-family: ui-rounded, "Avenir Next", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    canvas {
+      display: block;
+      width: min(100vw, 177.7778vh);
+      height: min(56.25vw, 100vh);
+      background: #8fd4e8;
+      outline: none;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="1280" height="720" tabindex="0" aria-label="Toot and Tumble game canvas"></canvas>
+  <p class="sr-only">Hold space, mouse, or touch to freeze the trombone. Release to blast. Press R to restart.</p>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+
+      const VIEW_W = 1280;
+      const VIEW_H = 720;
+      const LEVEL_W = 5000;
+      const LEVEL_H = 900;
+      const GROUND_Y = 620;
+
+      const GRAVITY = 1600;
+      const MAX_FALL = 900;
+      const BASE_RUN_SPEED = 85;
+      const AUTO_SCROLL_SPEED = 75;
+      const HORN_SPIN_SPEED = 140;
+      const SLIDE_OSCILLATION_SPEED = 1.25;
+      const MIN_BLAST_POWER = 260;
+      const MAX_BLAST_POWER = 760;
+      const BREATH_MAX = 100;
+      const BREATH_RECHARGE = 120;
+
+      const player = {
+        x: 250,
+        y: 560,
+        w: 36,
+        h: 54,
+        vx: 0,
+        vy: 0,
+        onFloor: false
+      };
+
+      const startPlayer = { x: 250, y: 560 };
+
+      let gameState = "Title";
+      let hornAngle = 90;
+      let lockedHornAngle = 90;
+      let isHolding = false;
+      let slidePhase = 0;
+      let slideValue = 0;
+      let breath = BREATH_MAX;
+      let blastCooldown = 0;
+      let cameraX = 640;
+      let failReason = "";
+      let lastTime = performance.now();
+      let audioContext = null;
+      let dpr = 1;
+
+      const soundWaves = [];
+      const dustPuffs = [];
+
+      const platforms = [
+        { x: 0, y: GROUND_Y, w: 940, h: 100, kind: "solid", skin: "sidewalk" },
+        { x: 520, y: 570, w: 180, h: 50, kind: "solid", skin: "car" },
+        { x: 1150, y: GROUND_Y, w: 660, h: 100, kind: "solid", skin: "sidewalk" },
+        { x: 1300, y: 550, w: 320, h: 70, kind: "solid", skin: "bus" },
+        { x: 1800, y: GROUND_Y, w: 760, h: 100, kind: "solid", skin: "sidewalk" },
+        { x: 1950, y: 500, w: 240, h: 24, kind: "oneway", skin: "scaffold" },
+        { x: 2300, y: 440, w: 220, h: 24, kind: "oneway", skin: "scaffold" },
+        { x: 2650, y: 570, w: 170, h: 50, kind: "solid", skin: "taxi" },
+        { x: 3020, y: GROUND_Y, w: 450, h: 100, kind: "solid", skin: "sidewalk" },
+        { x: 3200, y: 510, w: 220, h: 26, kind: "oneway", skin: "ledge" },
+        { x: 3500, y: 440, w: 200, h: 26, kind: "oneway", skin: "ledge" },
+        { x: 3800, y: 370, w: 220, h: 26, kind: "oneway", skin: "ledge" },
+        { x: 4050, y: GROUND_Y, w: 160, h: 100, kind: "solid", skin: "sidewalk" },
+        { x: 4200, y: 560, w: 520, h: 70, kind: "solid", skin: "roof" }
+      ];
+
+      const hazards = [
+        { x: 950, y: 690, w: 200, h: 210, kind: "pit" },
+        { x: 755, y: 592, w: 54, h: 28, kind: "dog", baseX: 755, range: 55, speed: 1.35 },
+        { x: 1650, y: 548, w: 38, h: 72, kind: "pedestrian", baseX: 1650, range: 40, speed: 0.95 },
+        { x: 2895, y: 570, w: 72, h: 50, kind: "barrier" },
+        { x: 3450, y: 690, w: 520, h: 210, kind: "pit" }
+      ];
+
+      const finishFlag = { x: 4550, y: 480, w: 48, h: 120 };
+
+      function resetGame() {
+        gameState = "Title";
+        player.x = startPlayer.x;
+        player.y = startPlayer.y;
+        player.vx = 0;
+        player.vy = 0;
+        player.onFloor = false;
+        hornAngle = 90;
+        lockedHornAngle = 90;
+        isHolding = false;
+        slidePhase = 0;
+        slideValue = 0;
+        breath = BREATH_MAX;
+        blastCooldown = 0;
+        cameraX = 640;
+        failReason = "";
+        soundWaves.length = 0;
+        dustPuffs.length = 0;
+      }
+
+      function resizeCanvas() {
+        dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        canvas.width = Math.floor(VIEW_W * dpr);
+        canvas.height = Math.floor(VIEW_H * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function approach(value, target, amount) {
+        if (value < target) return Math.min(target, value + amount);
+        if (value > target) return Math.max(target, value - amount);
+        return target;
+      }
+
+      function degreesToRadians(degrees) {
+        return degrees * Math.PI / 180;
+      }
+
+      function rectsOverlap(a, b) {
+        return a.x < b.x + b.w &&
+          a.x + a.w > b.x &&
+          a.y < b.y + b.h &&
+          a.y + a.h > b.y;
+      }
+
+      function playerRect() {
+        return {
+          x: player.x - player.w / 2,
+          y: player.y - player.h / 2,
+          w: player.w,
+          h: player.h
+        };
+      }
+
+      function ensureAudio() {
+        if (!audioContext) {
+          const AudioCtor = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtor) audioContext = new AudioCtor();
+        }
+        if (audioContext && audioContext.state === "suspended") {
+          audioContext.resume();
+        }
+      }
+
+      function playTone(freq, duration, type, gain, bend) {
+        if (!audioContext) return;
+        const now = audioContext.currentTime;
+        const osc = audioContext.createOscillator();
+        const amp = audioContext.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        if (bend) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + bend), now + duration);
+        amp.gain.setValueAtTime(0.0001, now);
+        amp.gain.exponentialRampToValueAtTime(gain, now + 0.02);
+        amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        osc.connect(amp).connect(audioContext.destination);
+        osc.start(now);
+        osc.stop(now + duration + 0.04);
+      }
+
+      function playBlastSound(powerLevel) {
+        if (powerLevel < 0.35) {
+          playTone(460, 0.12, "square", 0.045, 80);
+        } else if (powerLevel < 0.75) {
+          playTone(250, 0.18, "sawtooth", 0.055, -30);
+          playTone(375, 0.14, "triangle", 0.035, -10);
+        } else {
+          playTone(130, 0.34, "sawtooth", 0.075, -45);
+          playTone(196, 0.27, "square", 0.04, -35);
+        }
+      }
+
+      function playFailSound() {
+        playTone(260, 0.25, "sawtooth", 0.06, -100);
+        setTimeout(() => playTone(180, 0.34, "sawtooth", 0.055, -70), 120);
+      }
+
+      function playWinSound() {
+        playTone(330, 0.12, "triangle", 0.05, 40);
+        setTimeout(() => playTone(440, 0.16, "triangle", 0.05, 55), 110);
+        setTimeout(() => playTone(660, 0.22, "triangle", 0.055, 0), 240);
+      }
+
+      function startPlay() {
+        gameState = "Playing";
+        cameraX = 640;
+      }
+
+      function startHold() {
+        if (blastCooldown > 0 || isHolding) return;
+        isHolding = true;
+        lockedHornAngle = hornAngle;
+        slidePhase = 0;
+        slideValue = 0;
+      }
+
+      function releaseBlast() {
+        if (gameState !== "Playing" || !isHolding) return;
+        isHolding = false;
+
+        const cost = 20 + 45 * slideValue;
+        if (breath >= cost) {
+          const power = MIN_BLAST_POWER + (MAX_BLAST_POWER - MIN_BLAST_POWER) * slideValue;
+          const launchAngle = lockedHornAngle + 180;
+          const launchRadians = degreesToRadians(launchAngle);
+
+          breath -= cost;
+          player.vx = clamp(player.vx + Math.cos(launchRadians) * power, -450, 780);
+          player.vy = clamp(player.vy + Math.sin(launchRadians) * power, -900, 900);
+          player.onFloor = false;
+
+          spawnSoundWave(power / MAX_BLAST_POWER);
+          playBlastSound(slideValue);
+        } else {
+          playTone(90, 0.12, "square", 0.035, 30);
+        }
+
+        blastCooldown = 0.12;
+      }
+
+      function pressInput(event) {
+        if (event) event.preventDefault();
+        ensureAudio();
+        canvas.focus();
+
+        if (gameState === "Title") {
+          startPlay();
+          return;
+        }
+
+        if (gameState === "Playing") {
+          startHold();
+        }
+      }
+
+      function releaseInput(event) {
+        if (event) event.preventDefault();
+        releaseBlast();
+      }
+
+      function fail(reason) {
+        if (gameState !== "Playing") return;
+        gameState = "Failed";
+        failReason = reason;
+        isHolding = false;
+        player.vx = 0;
+        player.vy = 0;
+        playFailSound();
+      }
+
+      function win() {
+        if (gameState !== "Playing") return;
+        gameState = "Won";
+        isHolding = false;
+        player.vx = 0;
+        player.vy = 0;
+        playWinSound();
+      }
+
+      function spawnSoundWave(powerRatio) {
+        const mouth = getMouthPosition();
+        const horn = getHornEndPosition();
+        soundWaves.push({
+          x: horn.x,
+          y: horn.y,
+          angle: hornAngle,
+          radius: 20,
+          maxRadius: 88 + powerRatio * 72,
+          life: 0.28,
+          maxLife: 0.28
+        });
+
+        dustPuffs.push({
+          x: mouth.x,
+          y: mouth.y + 28,
+          life: 0.22,
+          maxLife: 0.22
+        });
+      }
+
+      function getMouthPosition() {
+        return {
+          x: player.x + 12,
+          y: player.y - 14
+        };
+      }
+
+      function getHornEndPosition() {
+        const mouth = getMouthPosition();
+        const radians = degreesToRadians(hornAngle);
+        const length = 132 + slideValue * 78;
+        return {
+          x: mouth.x + Math.cos(radians) * length,
+          y: mouth.y + Math.sin(radians) * length
+        };
+      }
+
+      function update(dt, now) {
+        updateMovingHazards(now);
+
+        if (gameState === "Playing") {
+          if (!isHolding) {
+            hornAngle = (hornAngle + HORN_SPIN_SPEED * dt) % 360;
+          } else {
+            hornAngle = lockedHornAngle;
+            slidePhase = (slidePhase + SLIDE_OSCILLATION_SPEED * dt) % 1;
+            slideValue = 1 - Math.abs(slidePhase * 2 - 1);
+          }
+
+          if (!isHolding) {
+            slideValue = approach(slideValue, 0, dt * 3.2);
+          }
+
+          if (blastCooldown > 0) {
+            blastCooldown = Math.max(0, blastCooldown - dt);
+          }
+
+          if (player.onFloor && !isHolding) {
+            breath = Math.min(BREATH_MAX, breath + BREATH_RECHARGE * dt);
+          }
+
+          movePlayer(dt);
+          updateCamera(dt);
+          checkHazardsAndFinish();
+        } else {
+          hornAngle = (hornAngle + 48 * dt) % 360;
+        }
+
+        for (let i = soundWaves.length - 1; i >= 0; i--) {
+          const wave = soundWaves[i];
+          wave.life -= dt;
+          wave.radius += (wave.maxRadius - wave.radius) * Math.min(1, dt * 9);
+          if (wave.life <= 0) soundWaves.splice(i, 1);
+        }
+
+        for (let i = dustPuffs.length - 1; i >= 0; i--) {
+          dustPuffs[i].life -= dt;
+          if (dustPuffs[i].life <= 0) dustPuffs.splice(i, 1);
+        }
+      }
+
+      function updateMovingHazards(now) {
+        for (const hazard of hazards) {
+          if (hazard.kind === "dog" || hazard.kind === "pedestrian") {
+            hazard.x = hazard.baseX + Math.sin(now * 0.001 * hazard.speed * Math.PI * 2) * hazard.range;
+          }
+        }
+      }
+
+      function movePlayer(dt) {
+        if (player.onFloor && !isHolding) {
+          player.vx = approach(player.vx, BASE_RUN_SPEED, 2200 * dt);
+        } else if (player.onFloor && isHolding) {
+          player.vx = approach(player.vx, Math.min(player.vx, BASE_RUN_SPEED * 0.35), 1200 * dt);
+        }
+
+        player.vy = clamp(player.vy + GRAVITY * dt, -1200, MAX_FALL);
+
+        const previousY = player.y;
+        player.x += player.vx * dt;
+        resolveHorizontal();
+
+        player.y += player.vy * dt;
+        resolveVertical(previousY);
+
+        player.x = clamp(player.x, player.w / 2, LEVEL_W - player.w / 2);
+      }
+
+      function resolveHorizontal() {
+        let rect = playerRect();
+        for (const platform of platforms) {
+          if (platform.kind !== "solid") continue;
+          if (!rectsOverlap(rect, platform)) continue;
+
+          if (player.vx > 0) {
+            player.x = platform.x - player.w / 2;
+          } else if (player.vx < 0) {
+            player.x = platform.x + platform.w + player.w / 2;
+          }
+          player.vx = 0;
+          rect = playerRect();
+        }
+      }
+
+      function resolveVertical(previousY) {
+        let rect = playerRect();
+        const previousBottom = previousY + player.h / 2;
+        player.onFloor = false;
+
+        for (const platform of platforms) {
+          if (!rectsOverlap(rect, platform)) continue;
+
+          if (platform.kind === "oneway") {
+            if (player.vy >= 0 && previousBottom <= platform.y + 9) {
+              player.y = platform.y - player.h / 2;
+              player.vy = 0;
+              player.onFloor = true;
+              rect = playerRect();
+            }
+            continue;
+          }
+
+          if (player.vy >= 0 && previousBottom <= platform.y + 24) {
+            player.y = platform.y - player.h / 2;
+            player.vy = 0;
+            player.onFloor = true;
+          } else if (player.vy < 0) {
+            player.y = platform.y + platform.h + player.h / 2;
+            player.vy = 0;
+          }
+          rect = playerRect();
+        }
+      }
+
+      function updateCamera(dt) {
+        cameraX += AUTO_SCROLL_SPEED * dt;
+        if (player.x > cameraX + 260) {
+          cameraX = player.x - 260;
+        }
+        cameraX = clamp(cameraX, VIEW_W / 2, LEVEL_W - VIEW_W / 2);
+
+        if (player.x < cameraX - 680) {
+          fail("fell behind the band");
+        }
+
+        if (player.y > LEVEL_H + 20) {
+          fail("fell off the city block");
+        }
+      }
+
+      function checkHazardsAndFinish() {
+        const rect = playerRect();
+
+        for (const hazard of hazards) {
+          if (rectsOverlap(rect, hazard)) {
+            fail(hazard.kind === "pit" ? "missed the landing" : "got interrupted");
+            return;
+          }
+        }
+
+        if (rectsOverlap(rect, finishFlag)) {
+          win();
+        }
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+        drawSky();
+        drawWorld();
+        drawHud();
+      }
+
+      function drawSky() {
+        const gradient = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+        gradient.addColorStop(0, "#86cdec");
+        gradient.addColorStop(0.58, "#c8e7e0");
+        gradient.addColorStop(1, "#f4d58b");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+        const scroll = cameraX - VIEW_W / 2;
+        drawBackgroundBuildings(scroll * 0.28, 0.55, "#4e6d84");
+        drawBackgroundBuildings(scroll * 0.48, 0.8, "#33485d");
+      }
+
+      function drawBackgroundBuildings(offset, scale, color) {
+        ctx.save();
+        ctx.globalAlpha = scale;
+        ctx.fillStyle = color;
+        for (let x = -220 - (offset % 360); x < VIEW_W + 240; x += 180) {
+          const h = 120 + ((Math.floor((x + offset) / 180) * 37) % 140);
+          const w = 104 + ((Math.floor((x + offset) / 90) * 19) % 60);
+          const y = GROUND_Y - h + 36;
+          ctx.fillRect(x, y, w, h);
+          ctx.fillStyle = "rgba(255, 234, 157, 0.55)";
+          for (let wx = x + 16; wx < x + w - 12; wx += 28) {
+            for (let wy = y + 18; wy < GROUND_Y + 8; wy += 34) {
+              ctx.fillRect(wx, wy, 10, 14);
+            }
+          }
+          ctx.fillStyle = color;
+        }
+        ctx.restore();
+      }
+
+      function drawWorld() {
+        const offsetX = Math.round(cameraX - VIEW_W / 2);
+        ctx.save();
+        ctx.translate(-offsetX, 0);
+
+        drawRoad();
+        for (const platform of platforms) drawPlatform(platform);
+        drawFinishFlag();
+        for (const hazard of hazards) drawHazard(hazard);
+        for (const dust of dustPuffs) drawDust(dust);
+        for (const wave of soundWaves) drawSoundWave(wave);
+        drawPlayerAndTrombone();
+
+        ctx.restore();
+      }
+
+      function drawRoad() {
+        ctx.fillStyle = "#27313d";
+        ctx.fillRect(0, 650, LEVEL_W, 250);
+        ctx.strokeStyle = "rgba(249, 242, 214, 0.65)";
+        ctx.lineWidth = 5;
+        ctx.setLineDash([48, 42]);
+        ctx.beginPath();
+        ctx.moveTo(0, 748);
+        ctx.lineTo(LEVEL_W, 748);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      function drawPlatform(platform) {
+        switch (platform.skin) {
+          case "sidewalk":
+            drawSidewalk(platform);
+            break;
+          case "car":
+          case "taxi":
+            drawCar(platform, platform.skin === "taxi");
+            break;
+          case "bus":
+            drawBus(platform);
+            break;
+          case "scaffold":
+            drawScaffold(platform);
+            break;
+          case "ledge":
+            drawLedge(platform);
+            break;
+          case "roof":
+            drawRoof(platform);
+            break;
+          default:
+            ctx.fillStyle = "#7d8b64";
+            ctx.fillRect(platform.x, platform.y, platform.w, platform.h);
+        }
+      }
+
+      function drawSidewalk(p) {
+        ctx.fillStyle = "#aba7a0";
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = "#d9d1bd";
+        ctx.fillRect(p.x, p.y, p.w, 18);
+        ctx.strokeStyle = "rgba(70, 72, 75, 0.45)";
+        ctx.lineWidth = 2;
+        for (let x = p.x; x < p.x + p.w; x += 95) {
+          ctx.beginPath();
+          ctx.moveTo(x, p.y);
+          ctx.lineTo(x + 20, p.y + 18);
+          ctx.stroke();
+        }
+      }
+
+      function drawCar(p, taxi) {
+        ctx.fillStyle = taxi ? "#f1be36" : "#d94b47";
+        roundedRect(p.x + 8, p.y + 12, p.w - 16, p.h - 16, 8);
+        ctx.fill();
+        ctx.fillStyle = taxi ? "#3d4351" : "#f2d7a6";
+        roundedRect(p.x + 50, p.y - 3, p.w - 94, 24, 6);
+        ctx.fill();
+        ctx.fillStyle = "#252b35";
+        ctx.beginPath();
+        ctx.arc(p.x + 42, p.y + p.h - 5, 17, 0, Math.PI * 2);
+        ctx.arc(p.x + p.w - 42, p.y + p.h - 5, 17, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#eef1f5";
+        ctx.fillRect(p.x + 20, p.y + 8, p.w - 40, 6);
+      }
+
+      function drawBus(p) {
+        ctx.fillStyle = "#f28f3b";
+        roundedRect(p.x, p.y + 10, p.w, p.h - 10, 10);
+        ctx.fill();
+        ctx.fillStyle = "#27313d";
+        for (let x = p.x + 28; x < p.x + p.w - 36; x += 44) {
+          roundedRect(x, p.y + 20, 28, 22, 4);
+          ctx.fill();
+        }
+        ctx.fillStyle = "#222832";
+        ctx.beginPath();
+        ctx.arc(p.x + 55, p.y + p.h - 2, 20, 0, Math.PI * 2);
+        ctx.arc(p.x + p.w - 55, p.y + p.h - 2, 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#f9f2d6";
+        ctx.font = "700 18px ui-rounded, system-ui";
+        ctx.fillText("CROSSTOWN", p.x + 100, p.y + 61);
+      }
+
+      function drawScaffold(p) {
+        ctx.strokeStyle = "#5e6b75";
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(p.x + 16, p.y + 24);
+        ctx.lineTo(p.x + 16, GROUND_Y);
+        ctx.moveTo(p.x + p.w - 16, p.y + 24);
+        ctx.lineTo(p.x + p.w - 16, GROUND_Y);
+        ctx.moveTo(p.x + 20, p.y + 84);
+        ctx.lineTo(p.x + p.w - 20, GROUND_Y - 8);
+        ctx.moveTo(p.x + p.w - 20, p.y + 84);
+        ctx.lineTo(p.x + 20, GROUND_Y - 8);
+        ctx.stroke();
+        ctx.fillStyle = "#c8a86e";
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = "#f9d36a";
+        for (let x = p.x + 8; x < p.x + p.w; x += 34) {
+          ctx.fillRect(x, p.y + 4, 18, 5);
+        }
+      }
+
+      function drawLedge(p) {
+        ctx.fillStyle = "#566779";
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = "#dee0d1";
+        ctx.fillRect(p.x - 10, p.y, p.w + 20, 8);
+        ctx.fillStyle = "#263447";
+        ctx.fillRect(p.x + 14, p.y + 26, p.w - 28, GROUND_Y - p.y - 26);
+        ctx.fillStyle = "rgba(255, 222, 137, 0.6)";
+        for (let x = p.x + 34; x < p.x + p.w - 22; x += 44) {
+          ctx.fillRect(x, p.y + 50, 16, 24);
+        }
+      }
+
+      function drawRoof(p) {
+        ctx.fillStyle = "#3a4151";
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = "#6c7787";
+        ctx.fillRect(p.x, p.y, p.w, 14);
+        ctx.fillStyle = "#232936";
+        ctx.fillRect(p.x + 80, p.y - 44, 84, 44);
+        ctx.fillStyle = "#b8d9e1";
+        ctx.fillRect(p.x + 103, p.y - 33, 36, 33);
+      }
+
+      function drawHazard(hazard) {
+        if (hazard.kind === "pit") {
+          ctx.fillStyle = "rgba(203, 58, 54, 0.20)";
+          ctx.fillRect(hazard.x, hazard.y, hazard.w, hazard.h);
+          ctx.fillStyle = "rgba(42, 28, 36, 0.72)";
+          ctx.fillRect(hazard.x, hazard.y + hazard.h - 38, hazard.w, 38);
+          return;
+        }
+
+        if (hazard.kind === "dog") {
+          ctx.fillStyle = "#7f5a3d";
+          roundedRect(hazard.x, hazard.y + 8, hazard.w, hazard.h - 8, 8);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(hazard.x + hazard.w - 4, hazard.y + 11, 13, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#573a26";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(hazard.x + 6, hazard.y + 14);
+          ctx.lineTo(hazard.x - 10, hazard.y + 4);
+          ctx.stroke();
+          ctx.fillStyle = "#101820";
+          ctx.fillRect(hazard.x + hazard.w + 2, hazard.y + 8, 4, 4);
+          return;
+        }
+
+        if (hazard.kind === "pedestrian") {
+          ctx.fillStyle = "#523c8f";
+          roundedRect(hazard.x + 7, hazard.y + 22, hazard.w - 14, hazard.h - 24, 8);
+          ctx.fill();
+          ctx.fillStyle = "#f0b989";
+          ctx.beginPath();
+          ctx.arc(hazard.x + hazard.w / 2, hazard.y + 13, 13, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#242b38";
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(hazard.x + 14, hazard.y + hazard.h - 8);
+          ctx.lineTo(hazard.x + 8, hazard.y + hazard.h + 10);
+          ctx.moveTo(hazard.x + hazard.w - 14, hazard.y + hazard.h - 8);
+          ctx.lineTo(hazard.x + hazard.w - 5, hazard.y + hazard.h + 9);
+          ctx.stroke();
+          return;
+        }
+
+        if (hazard.kind === "barrier") {
+          ctx.fillStyle = "#d94b47";
+          roundedRect(hazard.x, hazard.y, hazard.w, hazard.h, 5);
+          ctx.fill();
+          ctx.fillStyle = "#f9f2d6";
+          for (let x = hazard.x - 10; x < hazard.x + hazard.w; x += 34) {
+            ctx.save();
+            ctx.translate(x, hazard.y + 6);
+            ctx.rotate(-0.55);
+            ctx.fillRect(0, 0, 14, hazard.h + 18);
+            ctx.restore();
+          }
+        }
+      }
+
+      function drawFinishFlag() {
+        ctx.fillStyle = "#2e3442";
+        ctx.fillRect(finishFlag.x + 11, finishFlag.y, 8, finishFlag.h);
+        ctx.fillStyle = "#4da35f";
+        ctx.beginPath();
+        ctx.moveTo(finishFlag.x + 19, finishFlag.y + 8);
+        ctx.lineTo(finishFlag.x + 88, finishFlag.y + 28);
+        ctx.lineTo(finishFlag.x + 19, finishFlag.y + 49);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#f9f2d6";
+        ctx.font = "800 22px ui-rounded, system-ui";
+        ctx.fillText("GIG", finishFlag.x + 29, finishFlag.y + 36);
+      }
+
+      function drawDust(dust) {
+        const t = 1 - dust.life / dust.maxLife;
+        ctx.save();
+        ctx.globalAlpha = 1 - t;
+        ctx.fillStyle = "#c8b496";
+        ctx.beginPath();
+        ctx.arc(dust.x - 18, dust.y + 4, 8 + t * 22, 0, Math.PI * 2);
+        ctx.arc(dust.x + 16, dust.y + 8, 5 + t * 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawSoundWave(wave) {
+        const alpha = Math.max(0, wave.life / wave.maxLife);
+        ctx.save();
+        ctx.translate(wave.x, wave.y);
+        ctx.rotate(degreesToRadians(wave.angle));
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = "#fff0a6";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, wave.radius, wave.radius * 0.44, 0, -0.8, 0.8);
+        ctx.stroke();
+        ctx.strokeStyle = "#f5a24a";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(10, 0, wave.radius * 0.62, wave.radius * 0.28, 0, -0.75, 0.75);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawPlayerAndTrombone() {
+        drawTrombone();
+        drawPlayer();
+      }
+
+      function drawTrombone() {
+        const mouth = getMouthPosition();
+        const radians = degreesToRadians(hornAngle);
+        const bodyLength = 126;
+        const slideLength = 48 + slideValue * 80;
+
+        ctx.save();
+        ctx.translate(mouth.x, mouth.y);
+        ctx.rotate(radians);
+
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#c9872c";
+        ctx.lineWidth = 14;
+        ctx.beginPath();
+        ctx.moveTo(-8, 0);
+        ctx.lineTo(bodyLength, 0);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#f1bf4b";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(32, -22);
+        ctx.lineTo(32 + slideLength, -22);
+        ctx.lineTo(32 + slideLength, 22);
+        ctx.lineTo(32, 22);
+        ctx.stroke();
+
+        ctx.fillStyle = "#f0b642";
+        ctx.beginPath();
+        ctx.moveTo(bodyLength - 5, -32);
+        ctx.quadraticCurveTo(bodyLength + 64, -34, bodyLength + 70, 0);
+        ctx.quadraticCurveTo(bodyLength + 64, 34, bodyLength - 5, 32);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#925d22";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      function drawPlayer() {
+        const r = playerRect();
+        const bob = player.onFloor ? Math.sin(performance.now() * 0.018) * 2 : 0;
+
+        ctx.save();
+        ctx.translate(player.x, player.y + bob);
+
+        ctx.fillStyle = "rgba(30, 35, 42, 0.22)";
+        ctx.beginPath();
+        ctx.ellipse(0, player.h / 2 + 6, 23, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#2e5f8e";
+        roundedRect(-16, -10, 32, 35, 9);
+        ctx.fill();
+
+        ctx.fillStyle = "#f2bd8c";
+        ctx.beginPath();
+        ctx.arc(0, -25, 16, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#1f2530";
+        ctx.fillRect(-18, -43, 36, 12);
+        ctx.fillRect(-12, -58, 24, 17);
+
+        ctx.strokeStyle = "#202733";
+        ctx.lineWidth = 5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-8, 24);
+        ctx.lineTo(-12, 35);
+        ctx.moveTo(9, 24);
+        ctx.lineTo(13, 35);
+        ctx.stroke();
+
+        ctx.fillStyle = "#f9f2d6";
+        ctx.fillRect(-6, -29, 4, 4);
+        ctx.fillRect(7, -29, 4, 4);
+        ctx.strokeStyle = "#6c3e2e";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(6, -20, 8, 0.2, 2.25);
+        ctx.stroke();
+
+        if (gameState === "Failed") {
+          ctx.strokeStyle = "#cf3d3a";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-8, -31);
+          ctx.lineTo(-1, -25);
+          ctx.moveTo(-1, -31);
+          ctx.lineTo(-8, -25);
+          ctx.moveTo(8, -31);
+          ctx.lineTo(15, -25);
+          ctx.moveTo(15, -31);
+          ctx.lineTo(8, -25);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+
+        if (new URLSearchParams(window.location.search).has("debug")) {
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+          ctx.strokeRect(r.x, r.y, r.w, r.h);
+        }
+      }
+
+      function drawHud() {
+        drawMeters();
+
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        if (gameState === "Title") {
+          drawCenteredPanel("Toot & Tumble", "Hold to freeze. Release to BWAAP.", "Press Space / click / tap");
+        } else if (gameState === "Failed") {
+          drawCenteredPanel("OOF. GOOD TONE THOUGH.", failReason || "try a sharper angle", "Press R");
+        } else if (gameState === "Won") {
+          drawCenteredPanel("YOU MADE IT TO THE GIG.", "brass section reporting for duty", "Press R");
+        } else {
+          ctx.textAlign = "right";
+          ctx.fillStyle = "rgba(18, 27, 39, 0.72)";
+          ctx.font = "700 21px ui-rounded, system-ui";
+          ctx.fillText(isHolding ? "release on the sweet spot" : "wait for the angle", VIEW_W - 32, 36);
+        }
+      }
+
+      function drawMeters() {
+        const breathW = 230;
+        const slideW = 230;
+
+        ctx.save();
+        ctx.fillStyle = "rgba(18, 27, 39, 0.68)";
+        roundedRect(24, 24, 276, 88, 8);
+        ctx.fill();
+
+        ctx.fillStyle = "#f9f2d6";
+        ctx.font = "800 15px ui-rounded, system-ui";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText("BREATH", 42, 38);
+        ctx.fillText("SLIDE", 42, 76);
+
+        ctx.fillStyle = "#263447";
+        roundedRect(116, 39, breathW, 16, 6);
+        ctx.fill();
+        ctx.fillStyle = breath < 24 ? "#cf3d3a" : "#59b870";
+        roundedRect(116, 39, breathW * (breath / BREATH_MAX), 16, 6);
+        ctx.fill();
+
+        ctx.fillStyle = "#263447";
+        roundedRect(116, 77, slideW, 16, 6);
+        ctx.fill();
+        ctx.fillStyle = isHolding ? "#f1bf4b" : "#8e9a9f";
+        roundedRect(116, 77, Math.max(4, slideW * slideValue), 16, 6);
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(18, 27, 39, 0.68)";
+        roundedRect(24, 122, 148, 36, 8);
+        ctx.fill();
+        ctx.fillStyle = "#f9f2d6";
+        ctx.font = "800 17px ui-rounded, system-ui";
+        ctx.fillText("NO JUMP", 48, 131);
+        ctx.restore();
+      }
+
+      function drawCenteredPanel(title, subtitle, footer) {
+        ctx.save();
+        ctx.fillStyle = "rgba(17, 25, 36, 0.70)";
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+        ctx.fillStyle = "#f9f2d6";
+        ctx.font = "900 72px ui-rounded, system-ui";
+        ctx.fillText(title, VIEW_W / 2, 260);
+
+        ctx.fillStyle = "#f1bf4b";
+        ctx.font = "800 28px ui-rounded, system-ui";
+        ctx.fillText(subtitle, VIEW_W / 2, 330);
+
+        ctx.fillStyle = "#d7e6de";
+        ctx.font = "800 24px ui-rounded, system-ui";
+        ctx.fillText(footer, VIEW_W / 2, 405);
+        ctx.restore();
+      }
+
+      function roundedRect(x, y, w, h, r) {
+        const radius = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.arcTo(x + w, y, x + w, y + h, radius);
+        ctx.arcTo(x + w, y + h, x, y + h, radius);
+        ctx.arcTo(x, y + h, x, y, radius);
+        ctx.arcTo(x, y, x + w, y, radius);
+        ctx.closePath();
+      }
+
+      function frame(now) {
+        const dt = Math.min(1 / 30, (now - lastTime) / 1000 || 0);
+        lastTime = now;
+        update(dt, now);
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      window.addEventListener("resize", resizeCanvas);
+      canvas.addEventListener("pointerdown", pressInput);
+      canvas.addEventListener("pointerup", releaseInput);
+      canvas.addEventListener("pointercancel", releaseInput);
+      canvas.addEventListener("contextmenu", event => event.preventDefault());
+
+      window.addEventListener("keydown", event => {
+        if (event.code === "Space") {
+          if (!event.repeat) pressInput(event);
+        } else if (event.code === "KeyR") {
+          event.preventDefault();
+          resetGame();
+        }
+      });
+
+      window.addEventListener("keyup", event => {
+        if (event.code === "Space") {
+          releaseInput(event);
+        }
+      });
+
+      window.addEventListener("blur", () => {
+        if (isHolding) releaseBlast();
+      });
+
+      resizeCanvas();
+      resetGame();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
