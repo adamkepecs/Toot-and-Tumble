@@ -1,0 +1,59 @@
+{
+	"name": "PlayerBody",
+	"plugin-id": "Sprite",
+	"sid": 100000000019222,
+	"isGlobal": false,
+	"editorNewInstanceIsReplica": true,
+	"instanceVariables": [],
+	"behaviorTypes": [
+		{
+			"behaviorId": "Platform",
+			"name": "Platform",
+			"sid": 100000000010984
+		}
+	],
+	"effectTypes": [],
+	"animations": {
+		"items": [
+			{
+				"frames": [
+					{
+						"width": 36,
+						"height": 54,
+						"originX": 0.5,
+						"originY": 0.5,
+						"originalSource": "",
+						"exportFormat": "lossless",
+						"exportQuality": 0.8,
+						"fileType": "image/png",
+						"imageSpriteId": 1000000,
+						"collisionPoly": {
+							"points": [
+								0.08,
+								0.02,
+								0.92,
+								0.02,
+								0.92,
+								0.98,
+								0.08,
+								0.98
+							]
+						},
+						"useCollisionPoly": true,
+						"imagePoints": [],
+						"duration": 1,
+						"tag": ""
+					}
+				],
+				"sid": 100000000020595,
+				"name": "Default",
+				"isLooping": false,
+				"isPingPong": false,
+				"repeatCount": 1,
+				"repeatTo": 0,
+				"speed": 0
+			}
+		],
+		"subfolders": []
+	}
+}

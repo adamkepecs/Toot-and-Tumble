@@ -1,0 +1,17 @@
+{
+	"name": "HUD_Text",
+	"plugin-id": "Text",
+	"sid": 100000000074142,
+	"isGlobal": false,
+	"instanceVariables": [
+		{
+			"name": "role",
+			"type": "string",
+			"desc": "",
+			"show": true,
+			"sid": 100000000075515
+		}
+	],
+	"behaviorTypes": [],
+	"effectTypes": []
+}
