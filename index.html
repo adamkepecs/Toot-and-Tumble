@@ -72,9 +72,9 @@
       const MAX_FALL = 980;
       const BASE_RUN_SPEED = 85;
       const AUTO_SCROLL_SPEED = 18;
-      const HORN_SPIN_SPEED = 118;
+      const HORN_SPIN_SPEED = 212;
       const HORN_SWEEP_CENTER = 95;
-      const HORN_SWEEP_RANGE = 62;
+      const HORN_SWEEP_RANGE = 68;
       const SLIDE_OSCILLATION_SPEED = 1.25;
       const MIN_BLAST_POWER = 360;
       const MAX_BLAST_POWER = 1080;
@@ -209,17 +209,48 @@
       function playTone(freq, duration, type, gain, bend, delay = 0) {
         if (!audioContext) return;
         const now = audioContext.currentTime + delay;
+        const target = Math.max(40, freq + bend);
+        const master = audioContext.createGain();
+        const filter = audioContext.createBiquadFilter();
         const osc = audioContext.createOscillator();
-        const amp = audioContext.createGain();
-        osc.type = type;
+        const sub = audioContext.createOscillator();
+        const lfo = audioContext.createOscillator();
+        const lfoDepth = audioContext.createGain();
+
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(clamp(freq * 5.2, 520, 1750), now);
+        filter.frequency.exponentialRampToValueAtTime(clamp(target * 4.9, 460, 1550), now + duration);
+        filter.Q.setValueAtTime(2.7, now);
+
+        osc.type = type === "triangle" ? "triangle" : "sawtooth";
+        sub.type = "triangle";
         osc.frequency.setValueAtTime(freq, now);
-        if (bend) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + bend), now + duration);
-        amp.gain.setValueAtTime(0.0001, now);
-        amp.gain.exponentialRampToValueAtTime(gain, now + 0.02);
-        amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-        osc.connect(amp).connect(audioContext.destination);
+        sub.frequency.setValueAtTime(freq * 0.5, now);
+        if (bend) {
+          osc.frequency.exponentialRampToValueAtTime(target, now + duration);
+          sub.frequency.exponentialRampToValueAtTime(target * 0.5, now + duration);
+        }
+
+        lfo.frequency.setValueAtTime(5.8, now);
+        lfoDepth.gain.setValueAtTime(freq < 120 ? 18 : 11, now);
+        lfo.connect(lfoDepth);
+        lfoDepth.connect(osc.detune);
+        lfoDepth.connect(sub.detune);
+
+        master.gain.setValueAtTime(0.0001, now);
+        master.gain.exponentialRampToValueAtTime(gain, now + 0.035);
+        master.gain.setValueAtTime(gain * 0.82, now + Math.max(0.04, duration * 0.48));
+        master.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+        osc.connect(filter);
+        sub.connect(filter);
+        filter.connect(master).connect(audioContext.destination);
+        lfo.start(now);
+        lfo.stop(now + duration + 0.04);
         osc.start(now);
+        sub.start(now);
         osc.stop(now + duration + 0.04);
+        sub.stop(now + duration + 0.04);
       }
 
       function playBrassChord(notes, duration, bend, gain) {
@@ -230,12 +261,12 @@
 
       function playBlastSound(powerLevel) {
         if (powerLevel < 0.35) {
-          playBrassChord([430, 645], 0.14, 120, 0.055);
+          playBrassChord([220, 330], 0.16, 80, 0.07);
         } else if (powerLevel < 0.75) {
-          playBrassChord([220, 330, 440], 0.22, -35, 0.07);
+          playBrassChord([165, 247, 330], 0.26, -28, 0.085);
         } else {
-          playBrassChord([92, 138, 184, 276], 0.42, -48, 0.095);
-          playTone(55, 0.32, "sawtooth", 0.04, -12, 0.04);
+          playBrassChord([82, 123, 164, 246], 0.46, -42, 0.11);
+          playTone(55, 0.38, "sawtooth", 0.05, -9, 0.04);
         }
       }
 
@@ -626,6 +657,68 @@
             ctx.fillStyle = "#7d8b64";
             ctx.fillRect(platform.x, platform.y, platform.w, platform.h);
         }
+        if (platform.skin !== "sidewalk") {
+          drawLandingGuide(platform, platform.kind === "oneway");
+        }
+      }
+
+      function drawLandingGuide(p, oneWay) {
+        const inset = oneWay ? 4 : 10;
+        const guideColor = oneWay ? "#68e7ff" : "#9df46d";
+        const darkColor = oneWay ? "#137f9c" : "#3a7a2d";
+
+        ctx.save();
+        ctx.shadowColor = guideColor;
+        ctx.shadowBlur = oneWay ? 14 : 10;
+        ctx.fillStyle = guideColor;
+        roundedRect(p.x + inset, p.y - 7, p.w - inset * 2, 8, 4);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = darkColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p.x + inset + 4, p.y - 2);
+        ctx.lineTo(p.x + p.w - inset - 4, p.y - 2);
+        ctx.stroke();
+
+        if (oneWay) {
+          ctx.strokeStyle = "rgba(104, 231, 255, 0.86)";
+          ctx.lineWidth = 3;
+          ctx.setLineDash([12, 8]);
+          roundedRect(p.x + 5, p.y - 30, p.w - 10, 27, 6);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(104, 231, 255, 0.35)";
+          for (let x = p.x + 28; x < p.x + p.w - 20; x += 42) {
+            ctx.beginPath();
+            ctx.moveTo(x, p.y - 18);
+            ctx.lineTo(x + 9, p.y - 8);
+            ctx.lineTo(x - 9, p.y - 8);
+            ctx.closePath();
+            ctx.fill();
+          }
+        } else {
+          ctx.fillStyle = "rgba(249, 242, 214, 0.86)";
+          for (let x = p.x + 24; x < p.x + p.w - 18; x += 42) {
+            ctx.fillRect(x, p.y - 4, 18, 3);
+          }
+        }
+
+        ctx.restore();
+      }
+
+      function drawDangerGuide(hazard) {
+        ctx.save();
+        ctx.shadowColor = "#ff4747";
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = "rgba(255, 71, 71, 0.9)";
+        ctx.lineWidth = 4;
+        ctx.setLineDash([10, 7]);
+        roundedRect(hazard.x - 8, hazard.y - 8, hazard.w + 16, hazard.h + 16, 8);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
       }
 
       function drawSidewalk(p) {
@@ -644,6 +737,10 @@
       }
 
       function drawCar(p, taxi) {
+        ctx.fillStyle = "rgba(29, 36, 47, 0.28)";
+        ctx.beginPath();
+        ctx.ellipse(p.x + p.w / 2, p.y + p.h + 2, p.w * 0.46, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
         ctx.fillStyle = taxi ? "#f1be36" : "#d94b47";
         roundedRect(p.x + 8, p.y + 12, p.w - 16, p.h - 16, 8);
         ctx.fill();
@@ -657,9 +754,15 @@
         ctx.fill();
         ctx.fillStyle = "#eef1f5";
         ctx.fillRect(p.x + 20, p.y + 8, p.w - 40, 6);
+        ctx.fillStyle = taxi ? "#202735" : "#7a252b";
+        ctx.fillRect(p.x + 18, p.y + 32, p.w - 36, 4);
       }
 
       function drawBus(p) {
+        ctx.fillStyle = "rgba(29, 36, 47, 0.28)";
+        ctx.beginPath();
+        ctx.ellipse(p.x + p.w / 2, p.y + p.h + 4, p.w * 0.45, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
         ctx.fillStyle = "#f28f3b";
         roundedRect(p.x, p.y + 10, p.w, p.h - 10, 10);
         ctx.fill();
@@ -676,6 +779,8 @@
         ctx.fillStyle = "#f9f2d6";
         ctx.font = "700 18px ui-rounded, system-ui";
         ctx.fillText("CROSSTOWN", p.x + 100, p.y + 61);
+        ctx.fillStyle = "#a84c23";
+        ctx.fillRect(p.x + 15, p.y + 49, p.w - 30, 5);
       }
 
       function drawScaffold(p) {
@@ -697,6 +802,8 @@
         for (let x = p.x + 8; x < p.x + p.w; x += 34) {
           ctx.fillRect(x, p.y + 4, 18, 5);
         }
+        ctx.fillStyle = "rgba(104, 231, 255, 0.22)";
+        ctx.fillRect(p.x + 4, p.y + p.h + 5, p.w - 8, 18);
       }
 
       function drawLedge(p) {
@@ -710,6 +817,8 @@
         for (let x = p.x + 34; x < p.x + p.w - 22; x += 44) {
           ctx.fillRect(x, p.y + 50, 16, 24);
         }
+        ctx.fillStyle = "rgba(104, 231, 255, 0.16)";
+        ctx.fillRect(p.x + 8, p.y + 10, p.w - 16, 16);
       }
 
       function drawRoof(p) {
@@ -725,14 +834,32 @@
 
       function drawHazard(hazard) {
         if (hazard.kind === "pit") {
-          ctx.fillStyle = "rgba(203, 58, 54, 0.20)";
+          ctx.fillStyle = "rgba(203, 58, 54, 0.24)";
           ctx.fillRect(hazard.x, hazard.y, hazard.w, hazard.h);
+          ctx.fillStyle = "#cf3d3a";
+          for (let x = hazard.x - 8; x < hazard.x + hazard.w; x += 32) {
+            ctx.save();
+            ctx.translate(x, hazard.y + 2);
+            ctx.rotate(-0.58);
+            ctx.fillRect(0, 0, 15, 62);
+            ctx.restore();
+          }
+          ctx.fillStyle = "#f8d45d";
+          for (let x = hazard.x + 10; x < hazard.x + hazard.w; x += 42) {
+            ctx.beginPath();
+            ctx.moveTo(x, hazard.y + 8);
+            ctx.lineTo(x + 15, hazard.y + 34);
+            ctx.lineTo(x - 15, hazard.y + 34);
+            ctx.closePath();
+            ctx.fill();
+          }
           ctx.fillStyle = "rgba(42, 28, 36, 0.72)";
           ctx.fillRect(hazard.x, hazard.y + hazard.h - 38, hazard.w, 38);
           return;
         }
 
         if (hazard.kind === "dog") {
+          drawDangerGuide(hazard);
           ctx.fillStyle = "#7f5a3d";
           roundedRect(hazard.x, hazard.y + 8, hazard.w, hazard.h - 8, 8);
           ctx.fill();
@@ -751,6 +878,7 @@
         }
 
         if (hazard.kind === "pedestrian") {
+          drawDangerGuide(hazard);
           ctx.fillStyle = "#523c8f";
           roundedRect(hazard.x + 7, hazard.y + 22, hazard.w - 14, hazard.h - 24, 8);
           ctx.fill();
@@ -770,6 +898,7 @@
         }
 
         if (hazard.kind === "barrier") {
+          drawDangerGuide(hazard);
           ctx.fillStyle = "#d94b47";
           roundedRect(hazard.x, hazard.y, hazard.w, hazard.h, 5);
           ctx.fill();

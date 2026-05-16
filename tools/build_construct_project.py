@@ -172,6 +172,8 @@ def make_image(kind: str, width: int, height: int, base: str) -> Image:
     elif kind == "car":
         img.rect(4, 18, width - 8, height - 24, rgba(base))
         img.rect(34, 6, 70, 22, rgba(base))
+        img.rect(10, 0, width - 20, 7, rgba("9df46d"))
+        img.rect(14, 2, width - 28, 2, rgba("f9f2d6"))
         img.rect(45, 10, 20, 12, rgba("bde7ff"))
         img.rect(72, 10, 20, 12, rgba("bde7ff"))
         img.circle(30, height - 10, 9, dark)
@@ -179,6 +181,8 @@ def make_image(kind: str, width: int, height: int, base: str) -> Image:
         img.outline(4, 18, width - 8, height - 24, black, 2)
     elif kind == "bus":
         img.rect(4, 8, width - 8, height - 16, rgba("f3c747"))
+        img.rect(10, 0, width - 20, 7, rgba("9df46d"))
+        img.rect(14, 2, width - 28, 2, rgba("f9f2d6"))
         for x in range(22, width - 42, 34):
             img.rect(x, 15, 23, 18, rgba("bde7ff"))
         img.circle(36, height - 12, 11, dark)
@@ -187,24 +191,31 @@ def make_image(kind: str, width: int, height: int, base: str) -> Image:
     elif kind == "scaffold":
         img.rect(0, 0, width, 8, rgba("9fb0c7"))
         img.rect(0, height - 8, width, 8, rgba("9fb0c7"))
+        img.rect(4, 0, width - 8, 7, rgba("68e7ff"))
         for x in range(0, width, 28):
             img.line(x, 0, min(width - 1, x + 28), height - 1, rgba("647187"), 2)
+        for x in range(16, width - 12, 42):
+            img.line(x - 8, 14, x, 8, rgba("68e7ff", 200), 2)
+            img.line(x + 8, 14, x, 8, rgba("68e7ff", 200), 2)
         img.outline(0, 0, width, height, rgba("3e4858"), 2)
     elif kind == "ledge":
         img.rect(0, 0, width, height, rgba("7d8ca1"))
-        img.rect(0, 0, width, 8, rgba("ced6e4"))
+        img.rect(0, 0, width, 8, rgba("68e7ff"))
+        img.rect(0, 8, width, 4, rgba("ced6e4"))
         img.outline(0, 0, width, height, rgba("394556"), 2)
     elif kind == "ground":
         img.rect(0, 0, width, height, rgba("777b83"))
         img.rect(0, 0, width, 12, rgba("d6d8dc"))
+        img.rect(0, 0, width, 3, rgba("9df46d"))
         for x in range(0, width, 32):
             img.line(x, 0, x + 20, 12, rgba("aeb3ba"), 1)
     elif kind == "hazard":
-        img.rect(0, 0, width, height, rgba(base, 160))
+        img.rect(0, 0, width, height, rgba(base, 190))
         img.outline(0, 0, width, height, rgba("7b1f22", 220), 2)
-        for x in range(-height, width, 22):
-            img.line(x, height - 1, x + height, 0, rgba("ffd166", 220), 3)
+        for x in range(-height, width, 18):
+            img.line(x, height - 1, x + height, 0, rgba("ffd166", 240), 4)
     elif kind == "dog":
+        img.outline(2, 8, width - 4, height - 12, rgba("ff4747", 190), 2)
         img.rect(10, 24, 36, 18, rgba("7b4b2a"))
         img.circle(48, 25, 9, rgba("7b4b2a"))
         img.rect(14, 40, 6, 12, rgba("3f2414"))
@@ -212,6 +223,7 @@ def make_image(kind: str, width: int, height: int, base: str) -> Image:
         img.line(9, 27, 0, 18, rgba("7b4b2a"), 4)
         img.circle(51, 24, 2, black)
     elif kind == "pedestrian":
+        img.outline(3, 4, width - 6, height - 6, rgba("ff4747", 190), 2)
         img.circle(width // 2, 11, 8, rgba("e7b887"))
         img.rect(width // 2 - 8, 20, 16, 27, rgba(base))
         img.line(width // 2 - 3, 47, width // 2 - 14, height - 2, dark, 4)
@@ -497,10 +509,10 @@ GAME_SCRIPT = r'''
 		GameState: "Title",
 		HornAngle: 90,
 		LockedHornAngle: 90,
-		HornSpinSpeed: 118,
+		HornSpinSpeed: 212,
 		HornSweepPhase: 0,
 		HornSweepCenter: 95,
-		HornSweepRange: 62,
+		HornSweepRange: 68,
 		IsHolding: 0,
 		SlidePhase: 0,
 		SlideValue: 0,
@@ -587,17 +599,41 @@ GAME_SCRIPT = r'''
 
 	function playNote(ctx, freq, duration, type, gainValue, bend, delay = 0) {
 		const now = ctx.currentTime + delay;
-		const gain = ctx.createGain();
+		const target = Math.max(45, freq + bend);
+		const master = ctx.createGain();
+		const filter = ctx.createBiquadFilter();
 		const osc = ctx.createOscillator();
-		osc.type = type;
+		const sub = ctx.createOscillator();
+		const lfo = ctx.createOscillator();
+		const lfoDepth = ctx.createGain();
+		filter.type = "lowpass";
+		filter.frequency.setValueAtTime(clamp(freq * 5.2, 520, 1750), now);
+		filter.frequency.exponentialRampToValueAtTime(clamp(target * 4.9, 460, 1550), now + duration);
+		filter.Q.setValueAtTime(2.7, now);
+		osc.type = type === "triangle" ? "triangle" : "sawtooth";
+		sub.type = "triangle";
 		osc.frequency.setValueAtTime(freq, now);
-		osc.frequency.linearRampToValueAtTime(Math.max(45, freq + bend), now + duration);
-		gain.gain.setValueAtTime(0.0001, now);
-		gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.018);
-		gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-		osc.connect(gain).connect(ctx.destination);
+		sub.frequency.setValueAtTime(freq * 0.5, now);
+		osc.frequency.exponentialRampToValueAtTime(target, now + duration);
+		sub.frequency.exponentialRampToValueAtTime(target * 0.5, now + duration);
+		lfo.frequency.setValueAtTime(5.8, now);
+		lfoDepth.gain.setValueAtTime(freq < 120 ? 18 : 11, now);
+		lfo.connect(lfoDepth);
+		lfoDepth.connect(osc.detune);
+		lfoDepth.connect(sub.detune);
+		master.gain.setValueAtTime(0.0001, now);
+		master.gain.exponentialRampToValueAtTime(gainValue, now + 0.035);
+		master.gain.setValueAtTime(gainValue * 0.82, now + Math.max(0.04, duration * 0.48));
+		master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+		osc.connect(filter);
+		sub.connect(filter);
+		filter.connect(master).connect(ctx.destination);
+		lfo.start(now);
+		lfo.stop(now + duration + 0.04);
 		osc.start(now);
+		sub.start(now);
 		osc.stop(now + duration + 0.04);
+		sub.stop(now + duration + 0.04);
 	}
 
 	function playTone(kind) {
@@ -622,10 +658,10 @@ GAME_SCRIPT = r'''
 				}
 				return;
 			}
-			const notes = kind === "big" ? [92, 138, 184, 276] : kind === "medium" ? [220, 330, 440] : [430, 645];
-			const duration = kind === "big" ? 0.42 : kind === "medium" ? 0.22 : 0.14;
-			const bend = kind === "big" ? -48 : kind === "medium" ? -35 : 120;
-			const gainValue = kind === "big" ? 0.095 : kind === "medium" ? 0.07 : 0.055;
+			const notes = kind === "big" ? [82, 123, 164, 246] : kind === "medium" ? [165, 247, 330] : [220, 330];
+			const duration = kind === "big" ? 0.46 : kind === "medium" ? 0.26 : 0.16;
+			const bend = kind === "big" ? -42 : kind === "medium" ? -28 : 80;
+			const gainValue = kind === "big" ? 0.11 : kind === "medium" ? 0.085 : 0.07;
 			notes.forEach((note, index) => {
 				playNote(ctx, note, duration, index === 0 ? "sawtooth" : "square", gainValue / (index + 1.2), bend, index * 0.012);
 			});
@@ -943,7 +979,7 @@ def make_event_sheet() -> dict:
         event_var("GameState", "string", "Title"),
         event_var("HornAngle", "number", "90"),
         event_var("LockedHornAngle", "number", "90"),
-        event_var("HornSpinSpeed", "number", "118"),
+        event_var("HornSpinSpeed", "number", "212"),
         event_var("IsHolding", "number", "0"),
         event_var("SlidePhase", "number", "0"),
         event_var("SlideValue", "number", "0"),
@@ -1246,7 +1282,9 @@ def build() -> None:
         "- Space / mouse / touch press: freeze the spinning trombone angle\n"
         "- Release: blast opposite the horn direction\n"
         "- R / tap fail or win screen: restart\n\n"
-        "There is no normal jump. The trombone is the jump.\n",
+        "There is no normal jump. The trombone is the jump.\n\n"
+        "Visual cue: bright green tops are safe landing surfaces, cyan dashed platforms are jump-through, "
+        "and red striped/glowing objects are hazards.\n",
         encoding="utf-8",
     )
 

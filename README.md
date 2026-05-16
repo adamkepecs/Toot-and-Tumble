@@ -27,4 +27,4 @@ There is no normal jump button. The trombone is the jump.
 - Cars, bus, scaffolds, building ledges, pits, construction hazard, dog, pedestrian, finish flag, HUD breath bar, and slide power meter.
 - `ES_Game` contains the global variables and event groups requested for the MVP; the main implementation is installed from a C3 script action on layout start to avoid fragile hand-authored event-block IDs.
 - `index.html` mirrors the MVP as a browser playtest page so the repo can run without opening Construct 3 first.
-- The current tuning uses a slow stage scroll, a partial trombone sweep through useful launch angles, stronger brass-powered launches, generated brass sounds, and tap restart for phones.
+- The current tuning uses a slow stage scroll, a faster partial trombone sweep through useful launch angles, stronger brass-powered launches, trombone-like generated sounds, tap restart for phones, and clearer safe/hazard platform colors.

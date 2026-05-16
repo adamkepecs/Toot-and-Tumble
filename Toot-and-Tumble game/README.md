@@ -10,3 +10,5 @@ Controls:
 - R / tap fail or win screen: restart
 
 There is no normal jump. The trombone is the jump.
+
+Visual cue: bright green tops are safe landing surfaces, cyan dashed platforms are jump-through, and red striped/glowing objects are hazards.
