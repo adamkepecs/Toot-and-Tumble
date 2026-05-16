@@ -134,26 +134,33 @@ def make_image(kind: str, width: int, height: int, base: str) -> Image:
         img.rect(0, 0, width, height, rgba("55d6d2", 90))
         img.outline(0, 0, width, height, rgba("124c57", 170), 2)
     elif kind == "player_art":
-        img.circle(32, 17, 10, rgba("f6c28b"))
-        img.rect(22, 25, 22, 26, rgba("374e8c"))
-        img.rect(19, 8, 26, 6, rgba("211a30"))
-        img.rect(27, 2, 14, 9, rgba("211a30"))
-        img.rect(20, 51, 8, 10, rgba("2a2a2a"))
+        img.circle(32, 17, 11, rgba("f6c28b"))
+        img.rect(21, 25, 24, 27, rgba("c9363f"))
+        img.rect(27, 27, 10, 23, rgba("f9f2d6"))
+        img.rect(30, 33, 5, 5, rgba("ffd363"))
+        img.line(21, 31, 12, 40, rgba("7d1f28"), 3)
+        img.line(44, 31, 54, 25, rgba("7d1f28"), 3)
+        img.rect(18, 7, 28, 6, rgba("211a30"))
+        img.rect(26, 0, 16, 10, rgba("211a30"))
+        img.rect(26, 9, 16, 3, rgba("d94b47"))
+        img.rect(19, 51, 8, 10, rgba("2a2a2a"))
         img.rect(38, 51, 8, 10, rgba("2a2a2a"))
-        img.rect(15, 33, 11, 5, rgba("f6c28b"))
-        img.rect(42, 33, 10, 5, rgba("f6c28b"))
-        img.circle(28, 15, 2, black)
-        img.circle(36, 15, 2, black)
-        img.rect(28, 20, 9, 2, rgba("7a3030"))
-        img.rect(40, 26, 17, 6, rgba("dbb938"))
-        img.outline(40, 26, 17, 6, rgba("4b3a18"), 1)
+        img.circle(27, 15, 2, white)
+        img.circle(37, 15, 2, white)
+        img.circle(28, 15, 1, black)
+        img.circle(38, 15, 1, black)
+        img.circle(24, 21, 3, rgba("e88976"))
+        img.circle(40, 21, 3, rgba("e88976"))
+        img.line(27, 24, 37, 24, rgba("4c2f28"), 2)
     elif kind == "horn":
-        img.rect(0, 5, width, height - 10, rgba("e7bd38"))
+        img.rect(0, 3, width, height - 6, rgba("ffd363"))
+        img.rect(0, height // 2, width, 5, rgba("c9872c"))
         img.outline(0, 5, width, height - 10, rgba("5b4311"), 2)
-        img.line(8, height // 2 + 7, width - 8, height // 2 + 7, rgba("f5df72"), 2)
+        img.line(8, height // 2 - 4, width - 8, height // 2 - 4, rgba("fff0a6"), 2)
     elif kind == "bell":
-        img.circle(width // 2, height // 2, min(width, height) // 2 - 2, rgba("e7bd38"))
+        img.circle(width // 2, height // 2, min(width, height) // 2 - 2, rgba("f2b33f"))
         img.circle(width // 2, height // 2, min(width, height) // 2 - 10, rgba("6f4f14"))
+        img.circle(width // 2 - 5, height // 2 - 8, max(2, min(width, height) // 8), rgba("fff0a6"))
         img.outline(2, 2, width - 4, height - 4, rgba("49370f"), 2)
     elif kind == "slide":
         img.rect(0, height // 2 - 4, width, 8, rgba("f0d15a"))
@@ -490,20 +497,23 @@ GAME_SCRIPT = r'''
 		GameState: "Title",
 		HornAngle: 90,
 		LockedHornAngle: 90,
-		HornSpinSpeed: 140,
+		HornSpinSpeed: 118,
+		HornSweepPhase: 0,
+		HornSweepCenter: 95,
+		HornSweepRange: 62,
 		IsHolding: 0,
 		SlidePhase: 0,
 		SlideValue: 0,
 		SlideOscillationSpeed: 1.25,
-		MinBlastPower: 260,
-		MaxBlastPower: 760,
+		MinBlastPower: 360,
+		MaxBlastPower: 1080,
 		Breath: 100,
 		BreathMax: 100,
-		BreathRecharge: 120,
+		BreathRecharge: 145,
 		BlastCooldown: 0,
 		CameraX: 640,
 		CameraY: 360,
-		AutoScrollSpeed: 75,
+		AutoScrollSpeed: 18,
 		BaseRunSpeed: 85,
 		startX: 250,
 		startY: 560,
@@ -545,6 +555,7 @@ GAME_SCRIPT = r'''
 		state.GameState = "Title";
 		state.HornAngle = 90;
 		state.LockedHornAngle = 90;
+		state.HornSweepPhase = 0;
 		state.IsHolding = 0;
 		state.SlidePhase = 0;
 		state.SlideValue = 0;
@@ -574,6 +585,21 @@ GAME_SCRIPT = r'''
 		syncGlobals();
 	}
 
+	function playNote(ctx, freq, duration, type, gainValue, bend, delay = 0) {
+		const now = ctx.currentTime + delay;
+		const gain = ctx.createGain();
+		const osc = ctx.createOscillator();
+		osc.type = type;
+		osc.frequency.setValueAtTime(freq, now);
+		osc.frequency.linearRampToValueAtTime(Math.max(45, freq + bend), now + duration);
+		gain.gain.setValueAtTime(0.0001, now);
+		gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.018);
+		gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+		osc.connect(gain).connect(ctx.destination);
+		osc.start(now);
+		osc.stop(now + duration + 0.04);
+	}
+
 	function playTone(kind) {
 		const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
 		if (!AudioContextClass)
@@ -581,29 +607,28 @@ GAME_SCRIPT = r'''
 		try {
 			const ctx = globalThis.TootTumbleAudioContext || new AudioContextClass();
 			globalThis.TootTumbleAudioContext = ctx;
-			const now = ctx.currentTime;
-			const gain = ctx.createGain();
-			gain.connect(ctx.destination);
-			const osc = ctx.createOscillator();
-			osc.type = kind === "sad" ? "triangle" : "sawtooth";
-			osc.connect(gain);
+			if (ctx.state === "suspended")
+				ctx.resume();
 			if (kind === "sad") {
-				osc.frequency.setValueAtTime(260, now);
-				osc.frequency.linearRampToValueAtTime(110, now + 0.42);
-				gain.gain.setValueAtTime(0.08, now);
-				gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-				osc.start(now);
-				osc.stop(now + 0.52);
+				const notes = [
+					{ f: 330, d: 0.18, b: -65, delay: 0 },
+					{ f: 294, d: 0.20, b: -70, delay: 0.22 },
+					{ f: 247, d: 0.22, b: -72, delay: 0.47 },
+					{ f: 196, d: 0.62, b: -96, delay: 0.76 },
+				];
+				for (const note of notes) {
+					playNote(ctx, note.f, note.d, "sawtooth", 0.07, note.b, note.delay);
+					playNote(ctx, note.f * 0.5, note.d, "triangle", 0.035, note.b * 0.5, note.delay + 0.01);
+				}
 				return;
 			}
-			const base = kind === "big" ? 105 : kind === "medium" ? 180 : 310;
-			const duration = kind === "big" ? 0.28 : kind === "medium" ? 0.16 : 0.08;
-			osc.frequency.setValueAtTime(base, now);
-			osc.frequency.linearRampToValueAtTime(base * 0.72, now + duration);
-			gain.gain.setValueAtTime(kind === "big" ? 0.12 : 0.075, now);
-			gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-			osc.start(now);
-			osc.stop(now + duration + 0.02);
+			const notes = kind === "big" ? [92, 138, 184, 276] : kind === "medium" ? [220, 330, 440] : [430, 645];
+			const duration = kind === "big" ? 0.42 : kind === "medium" ? 0.22 : 0.14;
+			const bend = kind === "big" ? -48 : kind === "medium" ? -35 : 120;
+			const gainValue = kind === "big" ? 0.095 : kind === "medium" ? 0.07 : 0.055;
+			notes.forEach((note, index) => {
+				playNote(ctx, note, duration, index === 0 ? "sawtooth" : "square", gainValue / (index + 1.2), bend, index * 0.012);
+			});
 		} catch (err) {
 			console.warn("Audio unavailable", err);
 		}
@@ -614,8 +639,13 @@ GAME_SCRIPT = r'''
 			return;
 		state.GameState = "Playing";
 		setText("banner", "");
-		setText("hint", "SPACE / PRESS: freeze angle, release to BWAAP   R: restart");
+		setText("hint", "SPACE / PRESS: freeze angle, release to BWAAP   R / tap fail screen: restart");
 		syncGlobals();
+	}
+
+	function restartRun() {
+		resetRuntimeState();
+		startGame();
 	}
 
 	function startHold() {
@@ -642,14 +672,14 @@ GAME_SCRIPT = r'''
 			return;
 		state.IsHolding = 0;
 		const power = state.MinBlastPower + (state.MaxBlastPower - state.MinBlastPower) * state.SlideValue;
-		const cost = 20 + 45 * state.SlideValue;
+		const cost = 14 + 32 * state.SlideValue;
 		if (state.Breath >= cost) {
 			state.Breath = Math.max(0, state.Breath - cost);
 			const launchAngle = state.LockedHornAngle + 180;
 			const impulseX = Math.cos(degToRad(launchAngle)) * power;
 			const impulseY = Math.sin(degToRad(launchAngle)) * power;
-			platform.vectorX = clamp(platform.vectorX + impulseX, -450, 780);
-			platform.vectorY = clamp(platform.vectorY + impulseY, -900, 900);
+			platform.vectorX = clamp(platform.vectorX + impulseX, -700, 980);
+			platform.vectorY = clamp(platform.vectorY + impulseY, -1250, 1050);
 			spawnWave();
 			playTone(state.SlideValue > 0.75 ? "big" : state.SlideValue > 0.35 ? "medium" : "short");
 		} else {
@@ -669,7 +699,7 @@ GAME_SCRIPT = r'''
 		platform.vectorX = 0;
 		platform.vectorY = 0;
 		playTone("sad");
-		setText("banner", "OOF. GOOD TONE THOUGH.\nPress R.");
+		setText("banner", "OOF. GOOD TONE THOUGH.\nTap or press R.");
 		setText("hint", `Run failed: ${state.lastFailReason}`);
 		syncGlobals();
 	}
@@ -682,7 +712,7 @@ GAME_SCRIPT = r'''
 		platform.vectorX = 0;
 		platform.vectorY = 0;
 		playTone("big");
-		setText("banner", "YOU MADE IT TO THE GIG.\nPress R to encore.");
+		setText("banner", "YOU MADE IT TO THE GIG.\nTap or press R to encore.");
 		setText("hint", "Nice landing. The rooftop crowd is extremely relieved.");
 		syncGlobals();
 	}
@@ -696,33 +726,39 @@ GAME_SCRIPT = r'''
 		const mouthY = player.y - 16;
 		if (state.GameState === "Playing") {
 			if (!state.IsHolding) {
-				state.HornAngle = (state.HornAngle + state.HornSpinSpeed * dt) % 360;
+				state.HornSweepPhase = (state.HornSweepPhase + degToRad(state.HornSpinSpeed) * dt) % (Math.PI * 2);
+				state.HornAngle = state.HornSweepCenter + Math.sin(state.HornSweepPhase) * state.HornSweepRange;
 			} else {
 				state.HornAngle = state.LockedHornAngle;
 				state.SlidePhase = (state.SlidePhase + state.SlideOscillationSpeed * dt) % 1;
 				state.SlideValue = 1 - Math.abs(state.SlidePhase * 2 - 1);
 			}
+		} else {
+			state.HornSweepPhase = (state.HornSweepPhase + degToRad(42) * dt) % (Math.PI * 2);
+			state.HornAngle = state.HornSweepCenter + Math.sin(state.HornSweepPhase) * state.HornSweepRange;
 		}
 		const radians = degToRad(state.HornAngle);
 		const dx = Math.cos(radians);
 		const dy = Math.sin(radians);
-		const hornLength = 132 + (state.IsHolding ? state.SlideValue * 70 : 18);
+		const hornLength = 166 + (state.IsHolding ? state.SlideValue * 108 : 18);
 
 		pivot.x = mouthX;
 		pivot.y = mouthY;
 		horn.x = mouthX + dx * hornLength * 0.5;
 		horn.y = mouthY + dy * hornLength * 0.5;
 		horn.width = hornLength;
-		horn.height = 22;
+		horn.height = 28;
 		horn.angleDegrees = state.HornAngle;
-		slide.x = mouthX + dx * (76 + state.SlideValue * 40);
-		slide.y = mouthY + dy * (76 + state.SlideValue * 40);
-		slide.width = 72 + state.SlideValue * 70;
-		slide.height = 28;
+		slide.x = mouthX + dx * (88 + state.SlideValue * 54);
+		slide.y = mouthY + dy * (88 + state.SlideValue * 54);
+		slide.width = 90 + state.SlideValue * 105;
+		slide.height = 38;
 		slide.angleDegrees = state.HornAngle;
-		slide.isVisible = !!state.IsHolding;
+		slide.isVisible = true;
 		bell.x = mouthX + dx * hornLength;
 		bell.y = mouthY + dy * hornLength;
+		bell.width = 74;
+		bell.height = 74;
 		bell.angleDegrees = state.HornAngle;
 	}
 
@@ -746,9 +782,9 @@ GAME_SCRIPT = r'''
 		if (state.GameState === "Playing") {
 			state.CameraX += state.AutoScrollSpeed * dt;
 			if (player.x > state.CameraX + 260)
-				state.CameraX = player.x - 260;
+				state.CameraX = approach(state.CameraX, player.x - 260, 320 * dt);
 			state.CameraX = clamp(state.CameraX, 640, runtime.layout.width - 640);
-			if (player.x < state.CameraX - 680)
+			if (player.x < state.CameraX - 820)
 				fail("left behind by the gig van");
 		}
 		cameraAnchor.x = state.CameraX;
@@ -832,7 +868,7 @@ GAME_SCRIPT = r'''
 
 	function onKeyDown(e) {
 		if (e.code === "KeyR") {
-			restart();
+			restartRun();
 			return;
 		}
 		if (e.repeat)
@@ -854,6 +890,8 @@ GAME_SCRIPT = r'''
 		state.pressedPointers.add(e.pointerId || 1);
 		if (state.GameState === "Title")
 			startGame();
+		else if (state.GameState === "Failed" || state.GameState === "Won")
+			restartRun();
 		else
 			startHold();
 	}
@@ -905,18 +943,18 @@ def make_event_sheet() -> dict:
         event_var("GameState", "string", "Title"),
         event_var("HornAngle", "number", "90"),
         event_var("LockedHornAngle", "number", "90"),
-        event_var("HornSpinSpeed", "number", "140"),
+        event_var("HornSpinSpeed", "number", "118"),
         event_var("IsHolding", "number", "0"),
         event_var("SlidePhase", "number", "0"),
         event_var("SlideValue", "number", "0"),
-        event_var("MinBlastPower", "number", "260"),
-        event_var("MaxBlastPower", "number", "760"),
+        event_var("MinBlastPower", "number", "360"),
+        event_var("MaxBlastPower", "number", "1080"),
         event_var("Breath", "number", "100"),
         event_var("BreathMax", "number", "100"),
-        event_var("BreathRecharge", "number", "120"),
+        event_var("BreathRecharge", "number", "145"),
         event_var("BlastCooldown", "number", "0"),
         event_var("CameraX", "number", "640"),
-        event_var("AutoScrollSpeed", "number", "75"),
+        event_var("AutoScrollSpeed", "number", "18"),
         event_var("BaseRunSpeed", "number", "85"),
     ]
     groups = []
@@ -1207,7 +1245,7 @@ def build() -> None:
         "Controls:\n"
         "- Space / mouse / touch press: freeze the spinning trombone angle\n"
         "- Release: blast opposite the horn direction\n"
-        "- R: restart\n\n"
+        "- R / tap fail or win screen: restart\n\n"
         "There is no normal jump. The trombone is the jump.\n",
         encoding="utf-8",
     )

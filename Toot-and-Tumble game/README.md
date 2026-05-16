@@ -7,6 +7,6 @@ Open this folder in Construct 3 with **Menu -> Project -> Open -> Project folder
 Controls:
 - Space / mouse / touch press: freeze the spinning trombone angle
 - Release: blast opposite the horn direction
-- R: restart
+- R / tap fail or win screen: restart
 
 There is no normal jump. The trombone is the jump.

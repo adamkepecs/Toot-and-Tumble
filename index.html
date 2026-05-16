@@ -31,6 +31,13 @@
       user-select: none;
     }
 
+    @media (orientation: portrait) {
+      canvas {
+        width: 100vw;
+        height: 100dvh;
+      }
+    }
+
     .sr-only {
       position: absolute;
       width: 1px;
@@ -61,16 +68,18 @@
       const LEVEL_H = 900;
       const GROUND_Y = 620;
 
-      const GRAVITY = 1600;
-      const MAX_FALL = 900;
+      const GRAVITY = 1420;
+      const MAX_FALL = 980;
       const BASE_RUN_SPEED = 85;
-      const AUTO_SCROLL_SPEED = 75;
-      const HORN_SPIN_SPEED = 140;
+      const AUTO_SCROLL_SPEED = 18;
+      const HORN_SPIN_SPEED = 118;
+      const HORN_SWEEP_CENTER = 95;
+      const HORN_SWEEP_RANGE = 62;
       const SLIDE_OSCILLATION_SPEED = 1.25;
-      const MIN_BLAST_POWER = 260;
-      const MAX_BLAST_POWER = 760;
+      const MIN_BLAST_POWER = 360;
+      const MAX_BLAST_POWER = 1080;
       const BREATH_MAX = 100;
-      const BREATH_RECHARGE = 120;
+      const BREATH_RECHARGE = 145;
 
       const player = {
         x: 250,
@@ -87,6 +96,7 @@
       let gameState = "Title";
       let hornAngle = 90;
       let lockedHornAngle = 90;
+      let hornSweepPhase = 0;
       let isHolding = false;
       let slidePhase = 0;
       let slideValue = 0;
@@ -137,6 +147,7 @@
         player.onFloor = false;
         hornAngle = 90;
         lockedHornAngle = 90;
+        hornSweepPhase = 0;
         isHolding = false;
         slidePhase = 0;
         slideValue = 0;
@@ -195,9 +206,9 @@
         }
       }
 
-      function playTone(freq, duration, type, gain, bend) {
+      function playTone(freq, duration, type, gain, bend, delay = 0) {
         if (!audioContext) return;
-        const now = audioContext.currentTime;
+        const now = audioContext.currentTime + delay;
         const osc = audioContext.createOscillator();
         const amp = audioContext.createGain();
         osc.type = type;
@@ -211,21 +222,34 @@
         osc.stop(now + duration + 0.04);
       }
 
+      function playBrassChord(notes, duration, bend, gain) {
+        notes.forEach((note, index) => {
+          playTone(note, duration, index === 0 ? "sawtooth" : "square", gain / (index + 1.2), bend, index * 0.012);
+        });
+      }
+
       function playBlastSound(powerLevel) {
         if (powerLevel < 0.35) {
-          playTone(460, 0.12, "square", 0.045, 80);
+          playBrassChord([430, 645], 0.14, 120, 0.055);
         } else if (powerLevel < 0.75) {
-          playTone(250, 0.18, "sawtooth", 0.055, -30);
-          playTone(375, 0.14, "triangle", 0.035, -10);
+          playBrassChord([220, 330, 440], 0.22, -35, 0.07);
         } else {
-          playTone(130, 0.34, "sawtooth", 0.075, -45);
-          playTone(196, 0.27, "square", 0.04, -35);
+          playBrassChord([92, 138, 184, 276], 0.42, -48, 0.095);
+          playTone(55, 0.32, "sawtooth", 0.04, -12, 0.04);
         }
       }
 
       function playFailSound() {
-        playTone(260, 0.25, "sawtooth", 0.06, -100);
-        setTimeout(() => playTone(180, 0.34, "sawtooth", 0.055, -70), 120);
+        const notes = [
+          { f: 330, d: 0.18, b: -65, delay: 0 },
+          { f: 294, d: 0.20, b: -70, delay: 0.22 },
+          { f: 247, d: 0.22, b: -72, delay: 0.47 },
+          { f: 196, d: 0.62, b: -96, delay: 0.76 }
+        ];
+        for (const note of notes) {
+          playTone(note.f, note.d, "sawtooth", 0.07, note.b, note.delay);
+          playTone(note.f * 0.5, note.d, "triangle", 0.035, note.b * 0.5, note.delay + 0.01);
+        }
       }
 
       function playWinSound() {
@@ -237,6 +261,11 @@
       function startPlay() {
         gameState = "Playing";
         cameraX = 640;
+      }
+
+      function restartRun() {
+        resetGame();
+        startPlay();
       }
 
       function startHold() {
@@ -251,15 +280,15 @@
         if (gameState !== "Playing" || !isHolding) return;
         isHolding = false;
 
-        const cost = 20 + 45 * slideValue;
+        const cost = 14 + 32 * slideValue;
         if (breath >= cost) {
           const power = MIN_BLAST_POWER + (MAX_BLAST_POWER - MIN_BLAST_POWER) * slideValue;
           const launchAngle = lockedHornAngle + 180;
           const launchRadians = degreesToRadians(launchAngle);
 
           breath -= cost;
-          player.vx = clamp(player.vx + Math.cos(launchRadians) * power, -450, 780);
-          player.vy = clamp(player.vy + Math.sin(launchRadians) * power, -900, 900);
+          player.vx = clamp(player.vx + Math.cos(launchRadians) * power, -700, 980);
+          player.vy = clamp(player.vy + Math.sin(launchRadians) * power, -1250, 1050);
           player.onFloor = false;
 
           spawnSoundWave(power / MAX_BLAST_POWER);
@@ -278,6 +307,11 @@
 
         if (gameState === "Title") {
           startPlay();
+          return;
+        }
+
+        if (gameState === "Failed" || gameState === "Won") {
+          restartRun();
           return;
         }
 
@@ -353,7 +387,8 @@
 
         if (gameState === "Playing") {
           if (!isHolding) {
-            hornAngle = (hornAngle + HORN_SPIN_SPEED * dt) % 360;
+            hornSweepPhase = (hornSweepPhase + degreesToRadians(HORN_SPIN_SPEED) * dt) % (Math.PI * 2);
+            hornAngle = HORN_SWEEP_CENTER + Math.sin(hornSweepPhase) * HORN_SWEEP_RANGE;
           } else {
             hornAngle = lockedHornAngle;
             slidePhase = (slidePhase + SLIDE_OSCILLATION_SPEED * dt) % 1;
@@ -376,7 +411,8 @@
           updateCamera(dt);
           checkHazardsAndFinish();
         } else {
-          hornAngle = (hornAngle + 48 * dt) % 360;
+          hornSweepPhase = (hornSweepPhase + degreesToRadians(42) * dt) % (Math.PI * 2);
+          hornAngle = HORN_SWEEP_CENTER + Math.sin(hornSweepPhase) * HORN_SWEEP_RANGE;
         }
 
         for (let i = soundWaves.length - 1; i >= 0; i--) {
@@ -468,11 +504,11 @@
       function updateCamera(dt) {
         cameraX += AUTO_SCROLL_SPEED * dt;
         if (player.x > cameraX + 260) {
-          cameraX = player.x - 260;
+          cameraX = approach(cameraX, player.x - 260, 320 * dt);
         }
         cameraX = clamp(cameraX, VIEW_W / 2, LEVEL_W - VIEW_W / 2);
 
-        if (player.x < cameraX - 680) {
+        if (player.x < cameraX - 820) {
           fail("fell behind the band");
         }
 
@@ -795,47 +831,93 @@
       }
 
       function drawPlayerAndTrombone() {
-        drawTrombone();
         drawPlayer();
+        drawTrombone();
       }
 
       function drawTrombone() {
         const mouth = getMouthPosition();
         const radians = degreesToRadians(hornAngle);
-        const bodyLength = 126;
-        const slideLength = 48 + slideValue * 80;
+        const bodyLength = 152;
+        const slideLength = 62 + slideValue * 105;
 
         ctx.save();
         ctx.translate(mouth.x, mouth.y);
         ctx.rotate(radians);
 
         ctx.lineCap = "round";
-        ctx.strokeStyle = "#c9872c";
-        ctx.lineWidth = 14;
+
+        ctx.strokeStyle = "rgba(48, 34, 24, 0.28)";
+        ctx.lineWidth = 20;
+        ctx.beginPath();
+        ctx.moveTo(-10, 7);
+        ctx.lineTo(bodyLength + 5, 7);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#99672a";
+        ctx.lineWidth = 17;
         ctx.beginPath();
         ctx.moveTo(-8, 0);
         ctx.lineTo(bodyLength, 0);
         ctx.stroke();
 
-        ctx.strokeStyle = "#f1bf4b";
-        ctx.lineWidth = 8;
+        ctx.strokeStyle = "#ffd363";
+        ctx.lineWidth = 11;
         ctx.beginPath();
-        ctx.moveTo(32, -22);
-        ctx.lineTo(32 + slideLength, -22);
-        ctx.lineTo(32 + slideLength, 22);
-        ctx.lineTo(32, 22);
+        ctx.moveTo(-8, -2);
+        ctx.lineTo(bodyLength, -2);
         ctx.stroke();
 
-        ctx.fillStyle = "#f0b642";
+        ctx.strokeStyle = "#8c5a22";
+        ctx.lineWidth = 5;
         ctx.beginPath();
-        ctx.moveTo(bodyLength - 5, -32);
-        ctx.quadraticCurveTo(bodyLength + 64, -34, bodyLength + 70, 0);
-        ctx.quadraticCurveTo(bodyLength + 64, 34, bodyLength - 5, 32);
+        ctx.arc(28, 0, 28, Math.PI * 0.25, Math.PI * 1.75);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#f1bf4b";
+        ctx.lineWidth = 9;
+        ctx.beginPath();
+        ctx.moveTo(38, -27);
+        ctx.lineTo(38 + slideLength, -27);
+        ctx.lineTo(38 + slideLength, 27);
+        ctx.lineTo(38, 27);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#fff0a6";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(40, -31);
+        ctx.lineTo(36 + slideLength, -31);
+        ctx.stroke();
+
+        ctx.fillStyle = "#f2b33f";
+        ctx.beginPath();
+        ctx.moveTo(bodyLength - 8, -42);
+        ctx.quadraticCurveTo(bodyLength + 82, -44, bodyLength + 96, 0);
+        ctx.quadraticCurveTo(bodyLength + 82, 44, bodyLength - 8, 42);
         ctx.closePath();
         ctx.fill();
+
         ctx.strokeStyle = "#925d22";
-        ctx.lineWidth = 4;
+        ctx.lineWidth = 5;
         ctx.stroke();
+
+        ctx.strokeStyle = "#fff0a6";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(bodyLength + 13, -25);
+        ctx.quadraticCurveTo(bodyLength + 67, -28, bodyLength + 82, -4);
+        ctx.stroke();
+
+        ctx.fillStyle = "#f9f2d6";
+        ctx.font = "900 16px ui-rounded, system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("BWAAP", bodyLength + 50, 0);
+
+        ctx.fillStyle = "#c9872c";
+        roundedRect(-30, -7, 24, 14, 5);
+        ctx.fill();
 
         ctx.restore();
       }
@@ -849,39 +931,90 @@
 
         ctx.fillStyle = "rgba(30, 35, 42, 0.22)";
         ctx.beginPath();
-        ctx.ellipse(0, player.h / 2 + 6, 23, 7, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, player.h / 2 + 8, 28, 8, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = "#2e5f8e";
-        roundedRect(-16, -10, 32, 35, 9);
+        ctx.fillStyle = "#c9363f";
+        roundedRect(-19, -11, 38, 39, 9);
         ctx.fill();
+
+        ctx.fillStyle = "#f9f2d6";
+        roundedRect(-8, -9, 16, 34, 5);
+        ctx.fill();
+
+        ctx.fillStyle = "#24314a";
+        ctx.beginPath();
+        ctx.moveTo(-8, -5);
+        ctx.lineTo(0, 8);
+        ctx.lineTo(8, -5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = "#ffd363";
+        ctx.beginPath();
+        ctx.arc(0, 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "#7d1f28";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-18, 5);
+        ctx.lineTo(-31, 18);
+        ctx.moveTo(18, 5);
+        ctx.lineTo(31, -2);
+        ctx.stroke();
 
         ctx.fillStyle = "#f2bd8c";
         ctx.beginPath();
-        ctx.arc(0, -25, 16, 0, Math.PI * 2);
+        ctx.arc(0, -27, 17, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#e88976";
+        ctx.beginPath();
+        ctx.arc(-10, -22, 4, 0, Math.PI * 2);
+        ctx.arc(11, -22, 4, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = "#1f2530";
-        ctx.fillRect(-18, -43, 36, 12);
-        ctx.fillRect(-12, -58, 24, 17);
+        roundedRect(-19, -45, 38, 11, 4);
+        ctx.fill();
+        roundedRect(-13, -61, 26, 20, 4);
+        ctx.fill();
+        ctx.fillStyle = "#d94b47";
+        ctx.fillRect(-12, -43, 24, 4);
 
         ctx.strokeStyle = "#202733";
-        ctx.lineWidth = 5;
+        ctx.lineWidth = 6;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(-8, 24);
-        ctx.lineTo(-12, 35);
-        ctx.moveTo(9, 24);
-        ctx.lineTo(13, 35);
+        ctx.moveTo(-8, 25);
+        ctx.lineTo(-14, 38);
+        ctx.moveTo(9, 25);
+        ctx.lineTo(14, 38);
         ctx.stroke();
 
+        ctx.fillStyle = "#1f2530";
+        roundedRect(-22, 36, 16, 8, 4);
+        ctx.fill();
+        roundedRect(7, 36, 16, 8, 4);
+        ctx.fill();
+
         ctx.fillStyle = "#f9f2d6";
-        ctx.fillRect(-6, -29, 4, 4);
-        ctx.fillRect(7, -29, 4, 4);
-        ctx.strokeStyle = "#6c3e2e";
-        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(6, -20, 8, 0.2, 2.25);
+        ctx.arc(-6, -30, 3, 0, Math.PI * 2);
+        ctx.arc(8, -30, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#1b2028";
+        ctx.beginPath();
+        ctx.arc(-5, -30, 1.5, 0, Math.PI * 2);
+        ctx.arc(9, -30, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "#4c2f28";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-8, -20);
+        ctx.quadraticCurveTo(0, -16, 8, -20);
         ctx.stroke();
 
         if (gameState === "Failed") {
@@ -916,9 +1049,9 @@
         if (gameState === "Title") {
           drawCenteredPanel("Toot & Tumble", "Hold to freeze. Release to BWAAP.", "Press Space / click / tap");
         } else if (gameState === "Failed") {
-          drawCenteredPanel("OOF. GOOD TONE THOUGH.", failReason || "try a sharper angle", "Press R");
+          drawCenteredPanel("OOF. GOOD TONE THOUGH.", failReason || "try a sharper angle", "Tap / press R to restart");
         } else if (gameState === "Won") {
-          drawCenteredPanel("YOU MADE IT TO THE GIG.", "brass section reporting for duty", "Press R");
+          drawCenteredPanel("YOU MADE IT TO THE GIG.", "brass section reporting for duty", "Tap / press R to encore");
         } else {
           ctx.textAlign = "right";
           ctx.fillStyle = "rgba(18, 27, 39, 0.72)";
@@ -1015,7 +1148,7 @@
           if (!event.repeat) pressInput(event);
         } else if (event.code === "KeyR") {
           event.preventDefault();
-          resetGame();
+          restartRun();
         }
       });
 
